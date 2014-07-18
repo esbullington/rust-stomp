@@ -48,7 +48,7 @@ impl fmt::Show for StompVersion {
 pub struct Response<'a> {
   pub command: ServerCommand,
   pub headers: HashMap<String, Vec<String>>,
-  stream: TcpStream,
+  pub stream: TcpStream,
 }
 
 impl<'a> Response<'a> {
@@ -123,8 +123,9 @@ struct Request<'a> {
 
 impl<'a> Request<'a> {
 
-  pub fn with_socket(stream: TcpStream) -> Request {
-    Request{ command: String::new(), headers: HashMap::new(), body: String::new(), stream: stream }
+  pub fn with_socket(stream: &TcpStream) -> Request {
+    let s = stream.clone();
+    Request{ command: String::new(), headers: HashMap::new(), body: String::new(), stream: s }
   }
 
   pub fn set_command(&mut self, command: String) -> bool {
@@ -184,20 +185,21 @@ impl<'a> fmt::Show for Request<'a> {
 
 
 fn main() {
-  let stream = TcpStream::connect("localhost", 61613).unwrap();
+  let mut stream = TcpStream::connect("localhost", 61613).unwrap();
   // REQUEST
-  let stream2 = stream.clone();
-  let mut frame = Request::with_socket(stream2);
-  frame.set_command("CONNECT".to_string());
-  frame.set_header("accept-version".to_string(), "1.1".to_string());
-  frame.set_header("host".to_string(), "localhost".to_string());
-  frame.set_body("Hello from Rust".to_string());
-  let mut writer = stream.clone();
-  let res = frame.write_request(&mut writer).unwrap();
-  drop(writer);
+  /*let response_reader = writer.clone();*/
+  let mut request = Request::with_socket(&stream);
+  request.set_command("CONNECT".to_string());
+  request.set_header("accept-version".to_string(), "1.1".to_string());
+  request.set_header("host".to_string(), "localhost".to_string());
+  request.set_body("Hello from Rust".to_string());
+  /*let mut writer = stream.clone();*/
+  let response = request.write_request(&mut stream).unwrap();
+  // Drop request_writer socket
+  drop(stream);
   // RESPONSE
   println!("Success! Command: {}", res.command);
   println!("Success! Headers: {}", res.headers);
-  drop(res.stream); // close the connection
+  drop(res.stream); // close the response reader stream
 }
 
