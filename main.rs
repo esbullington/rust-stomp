@@ -1,5 +1,6 @@
 #![feature(phase)]
 extern crate debug;
+extern crate collections;
 #[phase(plugin, link)]  extern crate log;
 
 use std::io::TcpStream;
@@ -64,7 +65,7 @@ impl<'a> Response<'a> {
       _             => fail!("Invalid STOMP command")
     };
 
-    /*let version = match *segs.get(0) {*/
+    /*let version = match segs.get(0) {*/
     /*  "1.1"          => STOMP_1_1,*/
     /*  _             => fail!("unsupported STOMP version")*/
     /*};*/
@@ -112,6 +113,13 @@ impl<'a> Response<'a> {
     line
   }
 
+  pub fn get_header<'a>(&'a self, k: &str) ->&'a str {
+    let v = self.headers.get(&k.to_string()).as_slice().clone();
+    let st = v.get(0);
+    let s = st.unwrap();
+    s.as_slice()
+  }
+
 }
 
 struct Request<'a> {
@@ -128,17 +136,17 @@ impl<'a> Request<'a> {
     Request{ command: String::new(), headers: HashMap::new(), body: String::new(), stream: s }
   }
 
-  pub fn set_command(&mut self, command: String) -> bool {
-    self.command = command;
+  pub fn set_command(&mut self, command: &str) -> bool {
+    self.command = command.to_string();
     true
   }
 
-  pub fn set_header(&mut self, key: String, value: String) -> bool {
-    self.headers.insert(key, value)
+  pub fn set_header(&mut self, key: &str, value: &str) -> bool {
+    self.headers.insert(key.to_string(), value.to_string())
   }
 
-  pub fn set_body(&mut self, text: String) -> bool {
-    self.body = text;
+  pub fn set_body(&mut self, text: &str) -> bool {
+    self.body = text.to_string();
     true
   }
 
@@ -183,23 +191,38 @@ impl<'a> fmt::Show for Request<'a> {
     }
 }
 
+struct Client {
+  stream: TcpStream,
+  username: String,
+  password: String
+}
+
+impl Client {
+  
+  fn with_uri(s: &str) {
+  }
+
+}
+
 
 fn main() {
   let mut stream = TcpStream::connect("localhost", 61613).unwrap();
   // REQUEST
   /*let response_reader = writer.clone();*/
   let mut request = Request::with_socket(&stream);
-  request.set_command("CONNECT".to_string());
-  request.set_header("accept-version".to_string(), "1.1".to_string());
-  request.set_header("host".to_string(), "localhost".to_string());
-  request.set_body("Hello from Rust".to_string());
+  request.set_command("CONNECT");
+  request.set_header("accept-version", "1.1");
+  request.set_header("host", "localhost");
+  request.set_body("Hello from Rust");
   /*let mut writer = stream.clone();*/
   let response = request.write_request(&mut stream).unwrap();
+  let server = response.get_header("server");
+  println!("Server: {}", server);
   // Drop request_writer socket
   drop(stream);
   // RESPONSE
-  println!("Success! Command: {}", res.command);
-  println!("Success! Headers: {}", res.headers);
-  drop(res.stream); // close the response reader stream
+  println!("Success! Command: {}", response.command);
+  println!("Success! Headers: {}", response.headers);
+  /*drop(response.stream); // close the response reader stream*/
 }
 
