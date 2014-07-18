@@ -113,28 +113,33 @@ impl<'a> Response<'a> {
 
 }
 
-struct Frame {
+struct Request {
   command: String,
   headers: HashMap<String, String>,
-  body: String
+  body: String,
+  stream: TcpStream
 }
 
-impl Frame {
+impl Request {
 
-  fn new(command: String) -> Frame {
-    Frame{ command: command, headers: HashMap::new(), body: String::new() }
+  pub fn with_socket(stream: TcpStream) -> Request {
+    Request{ command: String::new(), headers: HashMap::new(), body: String::new(), stream: stream }
   }
 
-  pub fn set_header(&mut self, key: String, value: String) {
-    self.headers.insert(key, value);
+  pub fn set_command(&mut self, command: String) -> bool {
+    self.command = command
   }
 
-  pub fn set_body(&mut self, text: String) {
-    self.body = text;
+  pub fn set_header(&mut self, key: String, value: String) -> bool {
+    self.headers.insert(key, value)
+  }
+
+  pub fn set_body(&mut self, text: String) -> bool {
+    self.body = text
   }
 
   #[allow(unused_must_use)]
-  pub fn write_request(&self, w: &mut Writer) -> IoResult<()> {
+  pub fn write_request(&self, w: &mut Writer) -> IoResult<TcpStream> {
     
       // Command
       write!(w, "{}", self.command);
@@ -161,12 +166,14 @@ impl Frame {
         Ok(ok) => println!("Write successful: {}", ok)
       };
 
-      Ok(())
+      let res = Response::with_stream(&stream).unwrap();
+
+      Ok(res)
   }
 
 }
 
-impl fmt::Show for Frame {
+impl fmt::Show for Request {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         write!(f, "Command: {}\nHeaders: {}\nBody: {}\n\n", self.command, self.headers, self.body)
     }
@@ -176,16 +183,15 @@ impl fmt::Show for Frame {
 fn main() {
   let stream = TcpStream::connect("localhost", 61613).unwrap();
   // REQUEST
-  let mut frame = Frame::new("CONNECT".to_string());
+  let mut frame = Request::with_socket(&stream);
+  frame.set_command("CONNECT".to_string());
   frame.set_header("accept-version".to_string(), "1.1".to_string());
   frame.set_header("host".to_string(), "localhost".to_string());
   frame.set_body("Hello from Rust".to_string());
   let mut writer = stream.clone();
-  let _ = frame.write_request(&mut writer);
-  println!("Frame: {}", frame);
+  let res = frame.write_request(&mut writer);
   drop(writer);
   // RESPONSE
-  let res = Response::with_stream(&stream);
   println!("Success! Command: {}", res.command);
   println!("Success! Headers: {}", res.headers);
   drop(res.stream); // close the connection
