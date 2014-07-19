@@ -48,7 +48,7 @@ impl fmt::Show for StompVersion {
 
 pub struct Response<'a> {
   pub command: ServerCommand,
-  pub headers: HashMap<String, Vec<String>>,
+  pub headers: HashMap<String, String>,
   pub stream: TcpStream,
 }
 
@@ -80,8 +80,9 @@ impl<'a> Response<'a> {
       if segs.len() == 2 {
         let k = segs.get(0).trim();
         let v = segs.get(1).trim();
-        headers.insert_or_update_with(k.to_string(), vec!(v.into_string()),
-                        |_k, ov| ov.push(v.into_string()));
+        headers.insert(k.to_string(), v.into_string());
+        /*headers.insert_or_update_with(k.to_string(), vec!(v.into_string()),*/
+        /*                |_k, ov| ov.push(v.into_string()));*/
       } 
       else {
         if ["\n".to_string(), "\0".to_string()].contains(&line) {
@@ -113,11 +114,11 @@ impl<'a> Response<'a> {
     line
   }
 
-  pub fn get_header<'a>(&'a self, k: &str) ->&'a str {
-    let v = self.headers.get(&k.to_string()).as_slice().clone();
-    let st = v.get(0);
-    let s = st.unwrap();
-    s.as_slice()
+  // This is an unfortunately inefficient operation
+  // But due to lifetime issues, I know of no other way
+  pub fn get_header(&self, k: &str) -> String {
+    let v = self.headers.get_copy(&k.to_string());
+    v.as_slice().to_string()
   }
 
 }
@@ -199,7 +200,8 @@ struct Client {
 
 impl Client {
   
-  fn with_uri(s: &str) {
+  fn with_uri(s: &str) -> Client {
+    let mut stream = TcpStream::connect("localhost", 61613).unwrap();
   }
 
 }
@@ -216,13 +218,12 @@ fn main() {
   request.set_body("Hello from Rust");
   /*let mut writer = stream.clone();*/
   let response = request.write_request(&mut stream).unwrap();
-  let server = response.get_header("server");
+  let server = response.get_header("version");
   println!("Server: {}", server);
   // Drop request_writer socket
-  drop(stream);
   // RESPONSE
   println!("Success! Command: {}", response.command);
   println!("Success! Headers: {}", response.headers);
-  /*drop(response.stream); // close the response reader stream*/
+  drop(stream);
 }
 
