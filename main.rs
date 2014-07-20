@@ -1,17 +1,19 @@
 #![feature(phase)]
 extern crate debug;
+extern crate time;
 extern crate collections;
 #[phase(plugin, link)]  extern crate log;
 
 use std::io::TcpStream;
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{IoResult, BufferedReader};
+use std::io::{IoResult, BufferedReader, IoError};
 
 
 #[deriving(PartialEq, Show)]
 pub enum ClientCommand {
   STOMP,
+  SEND,
   CONNECT,
   SUBSCRIBE,
   UNSUBSCRIBE,
@@ -62,7 +64,8 @@ impl<'a> Response<'a> {
       "MESSAGE"     => MESSAGE,
       "RECEIPT"     => RECEIPT,
       "ERROR"       => fail!("Server error"),
-      _             => fail!("Invalid STOMP command")
+      c             => fail!("Invalid STOMP command here: {}", c)
+      /*_             => fail!("Invalid STOMP command")*/
     };
 
     /*let version = match segs.get(0) {*/
@@ -146,7 +149,19 @@ impl<'a> Request<'a> {
     self.headers.insert(key.to_string(), value.to_string())
   }
 
+  pub fn set_headers(&mut self, h: HashMap<&str, &str>) -> bool {
+    for (k,v) in h.iter() {
+      self.set_header(*k, *v);
+    } 
+    true
+  }
+
   pub fn set_body(&mut self, text: &str) -> bool {
+    self.body = text.to_string();
+    true
+  }
+
+  pub fn set_body_binary(&mut self, text: &[u8]) -> bool {
     self.body = text.to_string();
     true
   }
@@ -192,38 +207,85 @@ impl<'a> fmt::Show for Request<'a> {
     }
 }
 
+/*#[deriving(PartialEq, Show)]*/
+/*enum ClientError {*/
+/*  ConnectionError,*/
+/*}*/
+
 struct Client {
   stream: TcpStream,
   username: String,
-  password: String
+  password: String,
+  host: String
 }
 
 impl Client {
   
-  fn with_uri(s: &str) -> Client {
-    let mut stream = TcpStream::connect("localhost", 61613).unwrap();
+  fn with_uri(uri: &str) -> Client {
+    let s: String = String::from_str(uri);
+    let v: Vec<&str> = s.as_slice().split(':').collect();
+    let host = *v.get(0);
+    let port = from_str(*v.get(1)).unwrap();
+    let stream = TcpStream::connect(host, port).unwrap();
+    Client{ stream: stream, username: String::new(), password: String::new(), host: host.to_string() }
+  }
+
+  fn connect(&mut self, login: &str, passcode: &str) -> Result<Response, IoError> {
+    let mut request = Request::with_socket(&self.stream);
+    request.set_command("CONNECT");
+    request.set_header("accept-version", "1.1");
+    request.set_header("host", "localhost");
+    request.set_header("login", login);
+    request.set_header("passcode", passcode);
+    request.write_request(&mut self.stream)
+  }
+
+  fn send(&mut self, topic: &str, text: &str) -> Result<Response, IoError> {
+    let mut request = Request::with_socket(&self.stream);
+    request.set_command("SEND");
+    request.set_header("destination", topic);
+    // Will need to allow user to set content type
+    // or else determine it dynamically
+    request.set_header("content-type", "text/plain");
+    let l = text.len() + 10;
+    println!("Text len: {}", l);
+    /*request.set_header("content-length", l.to_string().as_slice());*/
+    /*request.set_header("receipt", "receipt123334");*/
+    request.set_body(text);
+    request.write_request(&mut self.stream)
   }
 
 }
 
+/*impl Drop for Client {*/
+/*  fn drop(&mut self) {*/
+/*    println!("Debugging drop");*/
+/*    drop(self.stream);*/
+/*  }*/
+/*}*/
+
 
 fn main() {
-  let mut stream = TcpStream::connect("localhost", 61613).unwrap();
-  // REQUEST
-  /*let response_reader = writer.clone();*/
-  let mut request = Request::with_socket(&stream);
-  request.set_command("CONNECT");
-  request.set_header("accept-version", "1.1");
-  request.set_header("host", "localhost");
-  request.set_body("Hello from Rust");
-  /*let mut writer = stream.clone();*/
-  let response = request.write_request(&mut stream).unwrap();
-  let server = response.get_header("version");
-  println!("Server: {}", server);
-  // Drop request_writer socket
-  // RESPONSE
+  /*let mut stream = TcpStream::connect("localhost", 61613).unwrap();*/
+  let mut client = Client::with_uri("localhost:61613");
+  // Test CONNECT
+  let response = client.connect("user", "pw").unwrap();
+  /*let server = response.get_header("version");*/
+  /*println!("Server: {}", server);*/
   println!("Success! Command: {}", response.command);
   println!("Success! Headers: {}", response.headers);
-  drop(stream);
+  // Test SEND
+  let mut buf = [0, ..128];
+  let amt = {
+    let mut wr = std::io::BufWriter::new(buf);
+    let t = time::get_time();
+    write!(&mut wr, "testing 123: {}", t.sec);
+    wr.tell().unwrap() as uint
+  };
+  let s = std::str::from_utf8(buf.slice(0, amt));
+  let r2 = client.send("/queue/test", s.unwrap());
+  println!("Success! Command: {}", response.command);
+  println!("Success! Headers: {}", response.headers);
+  drop(client.stream);
 }
 
