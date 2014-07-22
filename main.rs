@@ -242,20 +242,46 @@ impl Client {
     request.write_request(&mut self.stream)
   }
 
-  fn send(&mut self, topic: &str, text: &str) -> Result<Response, IoError> {
+  fn send_with_receipt(&mut self, topic: &str, text: &str, receipt: &str) -> Result<Response, IoError> {
     let mut request = Request::with_socket(&self.stream);
     request.set_command("SEND");
     request.set_header("destination", topic);
-    request.set_header("receipt", "receipt123334");
+    request.set_header("receipt", receipt);
     // Will need to allow user to set content type
     // or else determine it dynamically
     request.set_header("content-type", "text/plain");
-    // We have to leave off "content-length" header
+    // We have to leave off "content-length" header for now
     // due to ActiveMQ Stomp broker implementation... umm...quirk
-    /*let len = text.len() + 10;*/
+    /*let len = text.len();*/
     /*request.set_header("content-length", len.to_string().as_slice());*/
     request.set_body(text);
     request.write_request(&mut self.stream)
+  }
+
+  fn send(&mut self, topic: &str, text: &str) -> Result<Response, IoError> {
+    let mut buf = [0, ..128];
+    let amt = {
+      let mut wr = std::io::BufWriter::new(buf);
+      let t = time::get_time();
+      let _ = write!(&mut wr, "default-receipt-{}", t.sec);
+      wr.tell().unwrap() as uint
+    };
+    let s = std::str::from_utf8(buf.slice(0, amt));
+    self.send_with_receipt(topic, text, s.unwrap())
+  }
+
+  fn subscribe_with_id(&mut self, id: &str, topic: &str, ack: &str) -> Result<Response, IoError> {
+    let mut request = Request::with_socket(&self.stream);
+    request.set_command("SUBSCRIBE");
+    request.set_header("id", id);
+    request.set_header("destination", topic);
+    request.set_header("ack", ack);
+    request.write_request(&mut self.stream)
+  }
+
+  fn subscribe(&mut self, destination: &str, ack: &str) -> Result<Response, IoError> {
+    let id = "0";
+    self.subscribe_with_id(id, destination, ack)
   }
 
 }
@@ -284,8 +310,18 @@ fn test_send() {
   };
   let s = std::str::from_utf8(buf.slice(0, amt));
   let response = client.send("/queue/test", s.unwrap()).unwrap();
-  let id = response.get_header("receipt-id");
-  assert_eq!(id.as_slice(), "receipt123334");
   assert_eq!(response.command, RECEIPT);
+  let receipt_response = client.send_with_receipt("/queue/test", s.unwrap(), "receipt1234").unwrap();
+  let id = receipt_response.get_header("receipt-id");
+  assert_eq!(id.as_slice(), "receipt1234");
+  assert_eq!(receipt_response.command, RECEIPT);
   drop(client.stream);
+}
+
+// Test SEND
+#[test]
+fn test_subscribe() {
+  let mut client = Client::with_uri("localhost:61613");
+  let _ = client.connect("user", "pw").unwrap();
+  let response = client.send("/queue/test", "auto").unwrap();
 }
