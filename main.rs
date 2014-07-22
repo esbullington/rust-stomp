@@ -260,29 +260,32 @@ impl Client {
 
 }
 
-
-fn main() {
-  /*let mut stream = TcpStream::connect("localhost", 61613).unwrap();*/
+// Test CONNECT
+#[test]
+fn test_connect() {
   let mut client = Client::with_uri("localhost:61613");
-  // Test CONNECT
   let response = client.connect("user", "pw").unwrap();
-  /*let server = response.get_header("version");*/
-  /*println!("Server: {}", server);*/
-  println!("Success! Command: {}", response.command);
-  println!("Success! Headers: {}", response.headers);
-  // Test SEND
-  /*std::io::timer::sleep(2000);*/
+  assert_eq!(response.command, CONNECTED);
+  drop(client.stream);
+}
+
+// Test SEND
+#[test]
+fn test_send() {
+  let mut client = Client::with_uri("localhost:61613");
+  let _ = client.connect("user", "pw").unwrap();
   let mut buf = [0, ..128];
   // Temp hack to distinguish consecutive requests over discrete conns
   let amt = {
     let mut wr = std::io::BufWriter::new(buf);
     let t = time::get_time();
-    write!(&mut wr, "testing 123: {}", t.sec);
+    let _ = write!(&mut wr, "testing 123: {}", t.sec);
     wr.tell().unwrap() as uint
   };
   let s = std::str::from_utf8(buf.slice(0, amt));
-  let r2 = client.send("/queue/test", s.unwrap()).unwrap();
-  println!("Success! Command: {}", r2.command);
-  println!("Success! Headers: {}", r2.headers);
+  let response = client.send("/queue/test", s.unwrap()).unwrap();
+  let id = response.get_header("receipt-id");
+  assert_eq!(id.as_slice(), "receipt123334");
+  assert_eq!(response.command, RECEIPT);
   drop(client.stream);
 }
