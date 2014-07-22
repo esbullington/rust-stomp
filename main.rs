@@ -56,15 +56,18 @@ pub struct Response<'a> {
 
 impl<'a> Response<'a> {
 
+
   pub fn with_stream(s: &TcpStream) -> Response {
+
     let mut stream = BufferedReader::with_capacity(1, s.clone());
 
+
     let command = match stream.read_line().unwrap().as_slice().trim() {
+      "RECEIPT"     => RECEIPT,
       "CONNECTED"   => CONNECTED,
       "MESSAGE"     => MESSAGE,
-      "RECEIPT"     => RECEIPT,
       "ERROR"       => fail!("Server error"),
-      c             => fail!("Invalid STOMP command here: {}", c)
+      c             => fail!("Invalid STOMP command here: {:?}", c)
       /*_             => fail!("Invalid STOMP command")*/
     };
 
@@ -79,22 +82,20 @@ impl<'a> Response<'a> {
     loop {
       let line = stream.read_line().unwrap();
       let segs = line.as_slice().splitn(':', 1).collect::<Vec<&str>>();
-      /*println!("Segs is: {}", segs);*/
       if segs.len() == 2 {
         let k = segs.get(0).trim();
         let v = segs.get(1).trim();
         headers.insert(k.to_string(), v.into_string());
-        /*headers.insert_or_update_with(k.to_string(), vec!(v.into_string()),*/
-        /*                |_k, ov| ov.push(v.into_string()));*/
       } 
+      // Godawful hack
       else {
-        if ["\n".to_string(), "\0".to_string()].contains(&line) {
-          break;
+        match line.as_slice() {
+          "\n" => continue,
+          "\0" => break,
+          "\0\n" => break,
+          c    => println!("matched {:?}", c)
         }
-        /*println!("Fail: {}", segs);*/
-        fail!("malformatted line");
       }
-
     }
 
     Response { command: command, headers: headers, stream: stream.unwrap() }
@@ -168,35 +169,36 @@ impl<'a> Request<'a> {
 
   #[allow(unused_must_use)]
   pub fn write_request(&self, w: &mut Writer) -> IoResult<Response<'a>> {
-    
+
       // Command
-      write!(w, "{}", self.command);
+    write!(w, "{}", self.command);
 
-      w.write_str("\n");
+    w.write_str("\n");
 
-      // Headers
-      for (k, v) in self.headers.iter() {
-          w.write_str(k.as_slice());
-          w.write_str(":");
-          w.write_str(v.as_slice());
-          w.write_str("\n");
-      }
+    // Headers
+    for (k, v) in self.headers.iter() {
+        w.write_str(k.as_slice());
+        w.write_str(":");
+        w.write_str(v.as_slice());
+        w.write_str("\n");
+    }
 
-      w.write_str("\n\n");
+    w.write_str("\n\n");
 
-      // Body
-      w.write_str(self.body.as_slice());
+    // Body
+    w.write_str(self.body.as_slice());
 
-      w.write_str("\n\0");
+    w.write_str("\n\0");
 
-      match w.flush() {
-        Err(e) => fail!("{}", e),
-        Ok(ok) => println!("Write successful: {}", ok)
-      };
+    match w.flush() {
+      Err(e) => fail!("{}", e),
+      Ok(ok) => println!("Write successful: {}", ok)
+    };
 
-      let res = Response::with_stream(&self.stream);
 
-      Ok(res)
+    let res = Response::with_stream(&self.stream);
+
+    Ok(res)
   }
 
 }
@@ -244,25 +246,19 @@ impl Client {
     let mut request = Request::with_socket(&self.stream);
     request.set_command("SEND");
     request.set_header("destination", topic);
+    request.set_header("receipt", "receipt123334");
     // Will need to allow user to set content type
     // or else determine it dynamically
     request.set_header("content-type", "text/plain");
-    let l = text.len() + 10;
-    println!("Text len: {}", l);
-    /*request.set_header("content-length", l.to_string().as_slice());*/
-    /*request.set_header("receipt", "receipt123334");*/
+    // We have to leave off "content-length" header
+    // due to ActiveMQ Stomp broker implementation... umm...quirk
+    /*let len = text.len() + 10;*/
+    /*request.set_header("content-length", len.to_string().as_slice());*/
     request.set_body(text);
     request.write_request(&mut self.stream)
   }
 
 }
-
-/*impl Drop for Client {*/
-/*  fn drop(&mut self) {*/
-/*    println!("Debugging drop");*/
-/*    drop(self.stream);*/
-/*  }*/
-/*}*/
 
 
 fn main() {
@@ -275,7 +271,9 @@ fn main() {
   println!("Success! Command: {}", response.command);
   println!("Success! Headers: {}", response.headers);
   // Test SEND
+  /*std::io::timer::sleep(2000);*/
   let mut buf = [0, ..128];
+  // Temp hack to distinguish consecutive requests over discrete conns
   let amt = {
     let mut wr = std::io::BufWriter::new(buf);
     let t = time::get_time();
@@ -283,9 +281,8 @@ fn main() {
     wr.tell().unwrap() as uint
   };
   let s = std::str::from_utf8(buf.slice(0, amt));
-  let r2 = client.send("/queue/test", s.unwrap());
-  println!("Success! Command: {}", response.command);
-  println!("Success! Headers: {}", response.headers);
+  let r2 = client.send("/queue/test", s.unwrap()).unwrap();
+  println!("Success! Command: {}", r2.command);
+  println!("Success! Headers: {}", r2.headers);
   drop(client.stream);
 }
-
