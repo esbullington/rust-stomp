@@ -1,0 +1,15 @@
+before_install:
+  - git clone --recursive https://github.com/rust-lang/cargo
+  - yes | sudo add-apt-repository ppa:hansjorg/rust
+  - sudo apt-get update
+
+install:
+  - sudo apt-get install rust-nightly
+  - cd cargo && make && sudo make install && cd .. && sudo rm -rf cargo
+
+script:
+  - cargo build
+  - cargo test
+
+branches:
+  only: master

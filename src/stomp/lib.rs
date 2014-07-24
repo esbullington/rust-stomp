@@ -1,3 +1,9 @@
+#![desc = "A rust crate for Stomp protocol"]
+#![license = "MIT"]
+
+#![crate_name = "stomp"]
+#![crate_type = "lib"]
+
 #![feature(phase)]
 extern crate debug;
 extern crate time;
@@ -48,14 +54,13 @@ impl fmt::Show for StompVersion {
   }
 }
 
-pub struct Response<'a> {
+pub struct Response {
   pub command: ServerCommand,
   pub headers: HashMap<String, String>,
   pub stream: TcpStream,
 }
 
-impl<'a> Response<'a> {
-
+impl Response {
 
   pub fn with_stream(s: &TcpStream) -> Response {
 
@@ -71,7 +76,7 @@ impl<'a> Response<'a> {
       /*_             => fail!("Invalid STOMP command")*/
     };
 
-    /*let version = match segs.get(0) {*/
+    /*let version = match segs[0] {*/
     /*  "1.1"          => STOMP_1_1,*/
     /*  _             => fail!("unsupported STOMP version")*/
     /*};*/
@@ -83,8 +88,8 @@ impl<'a> Response<'a> {
       let line = stream.read_line().unwrap();
       let segs = line.as_slice().splitn(':', 1).collect::<Vec<&str>>();
       if segs.len() == 2 {
-        let k = segs.get(0).trim();
-        let v = segs.get(1).trim();
+        let k = segs[0].trim();
+        let v = segs[1].trim();
         headers.insert(k.to_string(), v.into_string());
       } 
       // Godawful hack
@@ -102,7 +107,7 @@ impl<'a> Response<'a> {
 
   }
 
-  fn parse_stream_to_string(&mut self) -> String {
+  pub fn parse_stream_to_string(&mut self) -> String {
     let mut line = std::string::String::new();
     loop {
       match self.stream.read_byte() {
@@ -127,14 +132,14 @@ impl<'a> Response<'a> {
 
 }
 
-struct Request<'a> {
+pub struct Request {
   command: String,
   headers: HashMap<String, String>,
   body: String,
   stream: TcpStream
 }
 
-impl<'a> Request<'a> {
+impl Request {
 
   pub fn with_socket(stream: &TcpStream) -> Request {
     let s = stream.clone();
@@ -168,7 +173,7 @@ impl<'a> Request<'a> {
   }
 
   #[allow(unused_must_use)]
-  pub fn write_request(&self, w: &mut Writer) -> IoResult<Response<'a>> {
+  pub fn write_request(&self, w: &mut Writer) -> IoResult<Response> {
 
       // Command
     write!(w, "{}", self.command);
@@ -203,7 +208,7 @@ impl<'a> Request<'a> {
 
 }
 
-impl<'a> fmt::Show for Request<'a> {
+impl fmt::Show for Request {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         write!(f, "Command: {}\nHeaders: {}\nBody: {}\n\n", self.command, self.headers, self.body)
     }
@@ -214,36 +219,41 @@ impl<'a> fmt::Show for Request<'a> {
 /*  ConnectionError,*/
 /*}*/
 
-struct Client {
-  stream: TcpStream,
-  username: String,
-  password: String,
-  host: String
+pub struct Client {
+  pub stream: TcpStream,
+  pub username: String,
+  pub password: String,
+  pub host: String
 }
 
 impl Client {
   
-  fn with_uri(uri: &str) -> Client {
+  pub fn with_uri(uri: &str) -> Client {
     let s: String = String::from_str(uri);
     let v: Vec<&str> = s.as_slice().split(':').collect();
-    let host = *v.get(0);
-    let port = from_str(*v.get(1)).unwrap();
+    let host = v[0];
+    let port = from_str(v[1]).unwrap();
     let stream = TcpStream::connect(host, port).unwrap();
     Client{ stream: stream, username: String::new(), password: String::new(), host: host.to_string() }
   }
 
-  fn connect(&mut self, login: &str, passcode: &str) -> Result<Response, IoError> {
-    let mut request = Request::with_socket(&self.stream);
+  pub fn connect(&mut self, login: &str, passcode: &str) -> Result<Response, IoError> {
+    let mut request = {
+      Request::with_socket(&mut self.stream)
+    };
     request.set_command("CONNECT");
     request.set_header("accept-version", "1.1");
     request.set_header("host", "localhost");
     request.set_header("login", login);
     request.set_header("passcode", passcode);
-    request.write_request(&mut self.stream)
+    let res = {
+      request.write_request(&mut self.stream)
+    };
+    res
   }
 
-  fn send_with_receipt(&mut self, topic: &str, text: &str, receipt: &str) -> Result<Response, IoError> {
-    let mut request = Request::with_socket(&self.stream);
+  pub fn send_with_receipt(&mut self, topic: &str, text: &str, receipt: &str) -> Result<Response, IoError> {
+    let mut request = Request::with_socket(&mut self.stream);
     request.set_command("SEND");
     request.set_header("destination", topic);
     request.set_header("receipt", receipt);
@@ -258,7 +268,7 @@ impl Client {
     request.write_request(&mut self.stream)
   }
 
-  fn send(&mut self, topic: &str, text: &str) -> Result<Response, IoError> {
+  pub fn send(&mut self, topic: &str, text: &str) -> Result<Response, IoError> {
     let mut buf = [0, ..128];
     let amt = {
       let mut wr = std::io::BufWriter::new(buf);
@@ -270,8 +280,8 @@ impl Client {
     self.send_with_receipt(topic, text, s.unwrap())
   }
 
-  fn subscribe_with_id(&mut self, id: &str, topic: &str, ack: &str) -> Result<Response, IoError> {
-    let mut request = Request::with_socket(&self.stream);
+  pub fn subscribe_with_id(&mut self, id: &str, topic: &str, ack: &str) -> Result<Response, IoError> {
+    let mut request = Request::with_socket(&mut self.stream);
     request.set_command("SUBSCRIBE");
     request.set_header("id", id);
     request.set_header("destination", topic);
@@ -279,49 +289,9 @@ impl Client {
     request.write_request(&mut self.stream)
   }
 
-  fn subscribe(&mut self, destination: &str, ack: &str) -> Result<Response, IoError> {
+  pub fn subscribe(&mut self, destination: &str, ack: &str) -> Result<Response, IoError> {
     let id = "0";
     self.subscribe_with_id(id, destination, ack)
   }
 
-}
-
-// Test CONNECT
-#[test]
-fn test_connect() {
-  let mut client = Client::with_uri("localhost:61613");
-  let response = client.connect("user", "pw").unwrap();
-  assert_eq!(response.command, CONNECTED);
-  drop(client.stream);
-}
-
-// Test SEND
-#[test]
-fn test_send() {
-  let mut client = Client::with_uri("localhost:61613");
-  let _ = client.connect("user", "pw").unwrap();
-  let mut buf = [0, ..128];
-  // Temp hack to distinguish consecutive requests over discrete conns
-  let amt = {
-    let mut wr = std::io::BufWriter::new(buf);
-    let t = time::get_time();
-    let _ = write!(&mut wr, "testing 123: {}", t.sec);
-    wr.tell().unwrap() as uint
-  };
-  let s = std::str::from_utf8(buf.slice(0, amt));
-  let response = client.send("/queue/test", s.unwrap()).unwrap();
-  assert_eq!(response.command, RECEIPT);
-  let receipt_response = client.send_with_receipt("/queue/test", s.unwrap(), "receipt1234").unwrap();
-  let id = receipt_response.get_header("receipt-id");
-  assert_eq!(id.as_slice(), "receipt1234");
-  assert_eq!(receipt_response.command, RECEIPT);
-  drop(client.stream);
-}
-
-// Test SEND
-#[test]
-fn test_subscribe() {
-  let mut client = Client::with_uri("localhost:61613");
-  let _ = client.connect("user", "pw").unwrap();
-  let response = client.send("/queue/test", "auto").unwrap();
 }
