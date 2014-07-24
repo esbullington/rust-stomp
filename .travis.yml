@@ -7,7 +7,6 @@ install:
 
 script:
   - cargo build
-  - cargo test
 
 branches:
   only: master
